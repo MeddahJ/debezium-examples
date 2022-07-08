@@ -8,14 +8,6 @@ services:
      - 2888:2888
      - 3888:3888
 
-#  kafka:
-#    image: quay.io/debezium/kafka:${DEBEZIUM_VERSION}
-#    ports:
-#     - 9092:9092
-#    links:
-#     - zookeeper
-#    environment:
-#     - ZOOKEEPER_CONNECT=zookeeper:2181
 
   kafka:
     image: quay.io/strimzi/kafka:0.22.1-kafka-2.7.0
@@ -50,19 +42,6 @@ services:
      - KAFKA_CONNECT_BOOTSTRAP_SERVERS=kafka:9092
      - |
          KAFKA_CONNECT_CONFIGURATION=
-         #database.hostname=db
-         #database.port=5432
-         #database.user=postgres
-         #database.password=postgres
-         #database.dbname=postgres
-         #database.server.name=product_db
-         #schema.include.list=public
-         #table.include.list=public.product_outbox
-         #transforms=outbox
-         #transforms.outbox.type=io.debezium.transforms.outbox.EventRouter
-         #transforms.outbox.table.field.event.timestamp=timestamp
-         #transforms.outbox.table.fields.additional.placement=type:header:eventType
-         #transforms.outbox.route.topic.replacement="${routedByValue}"
          key.converter=org.apache.kafka.connect.storage.StringConverter
          value.converter=io.debezium.converters.ByteBufferConverter
          key.converter.schemas.enable=false
@@ -78,11 +57,6 @@ services:
          status.storage.replication.factor=1
          consumer.interceptor.classes=io.opentracing.contrib.kafka.TracingConsumerInterceptor
          producer.interceptor.classes=io.opentracing.contrib.kafka.TracingProducerInterceptor
-#     - JAEGER_SERVICE_NAME=kafka-connect
-#     - JAEGER_AGENT_HOST=jaeger
-#     - JAEGER_SAMPLER_TYPE=const
-#     - JAEGER_SAMPLER_PARAM=1
-#     - STRIMZI_TRACING=jaeger
     command: /opt/kafka/kafka_connect_run.sh
 
   db:
@@ -102,8 +76,6 @@ services:
 
   schema-registry-confluent:
     image: confluentinc/cp-schema-registry:6.2.4
-    #hostname: schema-registry-confluent
-    #container_name: schema-registry-confluent
     depends_on:
       - zookeeper
       - kafka
@@ -115,8 +87,6 @@ services:
 
   control-center:
     image: confluentinc/cp-enterprise-control-center:5.4.0
-    #hostname: control-center
-    #container_name: control-center
     depends_on:
       - zookeeper
       - kafka
