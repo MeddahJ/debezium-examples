@@ -103,7 +103,14 @@ services:
       CONFLUENT_METRICS_TOPIC_REPLICATION: 1
       PORT: 9021
 
-
+  postgres-debezium-connector-init-cmd:
+    image: curlimages/curl:7.84.0
+    volumes: 
+      - ./:/app
+    command: ["--retry-connrefused", "--retry", "50", "--retry-delay", "0", "-X", "PUT", "-H", "Content-Type: application/json", "-d", "@app/register-postgres.json", "http://connect:8083/connectors/product-outbox/config"]
+    depends_on:
+      - connect
+    restart: on-failure
 volumes:
   db:
     driver: local
