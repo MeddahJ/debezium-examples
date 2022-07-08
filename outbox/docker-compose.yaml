@@ -1,62 +1,38 @@
-version: '2.1'
+version: '3.8'
 services:
-  jaeger:
-    image: jaegertracing/all-in-one:1
-    ports:
-     - 6831:6831/udp
-     - 16686:16686
+
   zookeeper:
     image: quay.io/debezium/zookeeper:${DEBEZIUM_VERSION}
     ports:
      - 2181:2181
      - 2888:2888
      - 3888:3888
+
+#  kafka:
+#    image: quay.io/debezium/kafka:${DEBEZIUM_VERSION}
+#    ports:
+#     - 9092:9092
+#    links:
+#     - zookeeper
+#    environment:
+#     - ZOOKEEPER_CONNECT=zookeeper:2181
+
   kafka:
-    image: quay.io/debezium/kafka:${DEBEZIUM_VERSION}
+    image: quay.io/strimzi/kafka:0.22.1-kafka-2.7.0
+    command: [
+        "sh", "-c",
+        "bin/kafka-server-start.sh config/server.properties --override listeners=$${KAFKA_LISTENERS} --override advertised.listeners=$${KAFKA_ADVERTISED_LISTENERS} --override zookeeper.connect=$${KAFKA_ZOOKEEPER_CONNECT}"
+    ]
+    depends_on:
+      - zookeeper
     ports:
-     - 9092:9092
-    links:
-     - zookeeper
+      - "9092:9092"
     environment:
-     - ZOOKEEPER_CONNECT=zookeeper:2181
-  order-db:
-    image: quay.io/debezium/example-postgres:${DEBEZIUM_VERSION}
-    ports:
-     - 5433:5432
-    healthcheck:
-      test: "pg_isready -U postgresuser -d orderdb"
-      interval: 2s
-      timeout: 20s
-      retries: 10
-    environment:
-     - POSTGRES_USER=postgresuser
-     - POSTGRES_PASSWORD=postgrespw
-     - POSTGRES_DB=orderdb
-     - PGPASSWORD=postgrespw
-  shipment-db:
-    image: quay.io/debezium/example-postgres:${DEBEZIUM_VERSION}
-    ports:
-      - 5434:5432
-    healthcheck:
-      test: "pg_isready -U postgresuser -d shipmentdb"
-      interval: 2s
-      timeout: 20s
-      retries: 10
-    environment:
-      - POSTGRES_USER=postgresuser
-      - POSTGRES_PASSWORD=postgrespw
-      - POSTGRES_DB=shipmentdb
-      - PGPASSWORD=postgrespw
-  pgadmin:
-    container_name: pgadmin_container
-    image: dpage/pgadmin4
-    environment:
-      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-pgadmin4@pgadmin.org}
-      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin}
-    volumes:
-      - ./servers.json:/pgadmin4/servers.json
-    ports:
-      - "${PGADMIN_PORT:-5050}:80"
+      LOG_DIR: "/tmp/logs"
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://192.168.56.104:9092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+
   connect:
     image: debezium/strimzi-connect
     build:
@@ -68,16 +44,31 @@ services:
      - 8083:8083
     links:
      - kafka
-     - order-db
+     - db
     environment:
      - KAFKA_LOG4J_OPTS=-Dlog4j.configuration=file:/opt/kafka/config/connect-log4j.properties
      - KAFKA_CONNECT_BOOTSTRAP_SERVERS=kafka:9092
      - |
          KAFKA_CONNECT_CONFIGURATION=
-         key.converter=org.apache.kafka.connect.json.JsonConverter
-         value.converter=org.apache.kafka.connect.json.JsonConverter
+         #database.hostname=db
+         #database.port=5432
+         #database.user=postgres
+         #database.password=postgres
+         #database.dbname=postgres
+         #database.server.name=product_db
+         #schema.include.list=public
+         #table.include.list=public.product_outbox
+         #transforms=outbox
+         #transforms.outbox.type=io.debezium.transforms.outbox.EventRouter
+         #transforms.outbox.table.field.event.timestamp=timestamp
+         #transforms.outbox.table.fields.additional.placement=type:header:eventType
+         #transforms.outbox.route.topic.replacement="${routedByValue}"
+         key.converter=org.apache.kafka.connect.storage.StringConverter
+         value.converter=io.debezium.converters.ByteBufferConverter
          key.converter.schemas.enable=false
          value.converter.schemas.enable=false
+         value.converter.delegate.converter.type=org.apache.kafka.connect.json.JsonConverter
+         value.converter.delegate.converter.type.schemas.enable=false
          group.id=connect
          offset.storage.topic=connect-offsets
          offset.storage.replication.factor=1
@@ -87,51 +78,63 @@ services:
          status.storage.replication.factor=1
          consumer.interceptor.classes=io.opentracing.contrib.kafka.TracingConsumerInterceptor
          producer.interceptor.classes=io.opentracing.contrib.kafka.TracingProducerInterceptor
-     - JAEGER_SERVICE_NAME=kafka-connect
-     - JAEGER_AGENT_HOST=jaeger
-     - JAEGER_SAMPLER_TYPE=const
-     - JAEGER_SAMPLER_PARAM=1
-     - STRIMZI_TRACING=jaeger
+#     - JAEGER_SERVICE_NAME=kafka-connect
+#     - JAEGER_AGENT_HOST=jaeger
+#     - JAEGER_SAMPLER_TYPE=const
+#     - JAEGER_SAMPLER_PARAM=1
+#     - STRIMZI_TRACING=jaeger
     command: /opt/kafka/kafka_connect_run.sh
-  order-service:
-    image: debezium-examples/outbox-order-service:${DEBEZIUM_VERSION}
-    build:
-      context: order-service
-      dockerfile: src/main/docker/Dockerfile.${QUARKUS_BUILD:-jvm}
+
+  db:
+    image: postgres:14.1-alpine
+    restart: always
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    command: 
+      - "postgres"
+      - "-c"
+      - "wal_level=logical"
     ports:
-     - 8080:8080
-    links:
-     - kafka
-     - order-db
-     - jaeger
-    environment:
-     - QUARKUS_DEBEZIUM_OUTBOX_REMOVE_AFTER_INSERT=true
-     - JAEGER_SERVICE_NAME=order-service
-     - JAEGER_SAMPLER_TYPE=const
-     - JAEGER_SAMPLER_PARAM=1
-     - JAEGER_AGENT_HOST=jaeger
+      - '5432:5432'
+    volumes: 
+      - db:/var/lib/postgresql/data
+
+  schema-registry-confluent:
+    image: confluentinc/cp-schema-registry:6.2.4
+    #hostname: schema-registry-confluent
+    #container_name: schema-registry-confluent
     depends_on:
-      order-db:
-        condition: service_healthy
-      connect:
-        condition: service_started
-    command: "./application -Dquarkus.datasource.jdbc.url=jdbc:postgresql://order-db:5432/orderdb?currentSchema=inventory -Dquarkus.datasource.username=postgresuser -Dquarkus.datasource.password=postgrespw"
-  shipment-service:
-    image: debezium-examples/outbox-shipment-service:${DEBEZIUM_VERSION}
-    build:
-      context: shipment-service
-      dockerfile: src/main/docker/Dockerfile.${QUARKUS_BUILD:-jvm}
-    links:
-     - kafka
-     - shipment-db
-     - jaeger
+      - zookeeper
+      - kafka
+    ports:
+      - "8081:8081"
     environment:
-     - JAEGER_SERVICE_NAME=shipment-service
-     - JAEGER_SAMPLER_TYPE=const
-     - JAEGER_SAMPLER_PARAM=1
-     - JAEGER_AGENT_HOST=jaeger
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry-confluent
+      SCHEMA_REGISTRY_KAFKASTORE_CONNECTION_URL: "zookeeper:2181"
+
+  control-center:
+    image: confluentinc/cp-enterprise-control-center:5.4.0
+    #hostname: control-center
+    #container_name: control-center
     depends_on:
-      shipment-db:
-        condition: service_healthy
-      connect:
-        condition: service_started
+      - zookeeper
+      - kafka
+      - schema-registry-confluent
+    ports:
+      - "9021:9021"
+    environment:
+      CONTROL_CENTER_BOOTSTRAP_SERVERS: 'kafka:9092'
+      CONTROL_CENTER_ZOOKEEPER_CONNECT: 'zookeeper:2181'
+      CONTROL_CENTER_SCHEMA_REGISTRY_URL: "http://schema-registry-confluent:8081"
+      CONTROL_CENTER_REPLICATION_FACTOR: 1
+      CONTROL_CENTER_INTERNAL_TOPICS_PARTITIONS: 1
+      CONTROL_CENTER_MONITORING_INTERCEPTOR_TOPIC_PARTITIONS: 1
+      CONFLUENT_METRICS_TOPIC_REPLICATION: 1
+      PORT: 9021
+
+
+volumes:
+  db:
+    driver: local
+
