@@ -13,6 +13,9 @@
         "transforms.outbox.table.field.event.timestamp":"timestamp",
         "transforms.outbox.table.fields.additional.placement":"type:header:eventType",
         "transforms.outbox.route.topic.replacement":"${routedByValue}",
+	"transforms.outbox.route.by.field":"aggregate_type",
+	"transforms.outbox.table.field.event.key":"aggregate_id",
+	"transforms.outbox.tracing.span.context.field":"tracing_span_context",
 	"plugin.name": "pgoutput",
 	"binary.handling.mode": "bytes"
 }
